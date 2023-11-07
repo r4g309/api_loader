@@ -112,10 +112,10 @@ async def main(csv_file:str, endpoint_url:str,model:str):
                 timeout=30.0,
             )
             assert response.status_code == 200, f"Error cargando las disciplinas {response.json()}"
-            
+           
         temp_file = open(temp_file_name, "rb")
         response = httpx.post(
-            url=f"{endpoint_url}load/{model}",
+            url=f"{endpoint_url}/load/{model}",
             headers={"accept": "application/json", "Authorization": user_token},
             files={"file": (temp_file_name, temp_file, "text/csv")},
             verify=False,
