@@ -1,38 +1,46 @@
 import asyncio
 import os
+from argparse import ArgumentParser
+from pathlib import Path
+from time import sleep
 
 import httpx
 import polars as pl
 import psycopg2
 from dotenv import load_dotenv
-from rich import progress
-from rich.progress import TaskID
+from rich.console import Console
+from rich.progress import Progress
 
 temp_file_name = "temp_file.csv"
-csv_file = "./user_600.csv"
-ENDPOINT_URL = "https://sig_catolica_api-1-w5327817.deta.app/"
 
 
-async def activate_user_requests(
-    session: httpx.AsyncClient, pb: progress.Progress, task_id: TaskID, confirmation, password
-):
+async def activate_user_requests(endpoint_url, session: httpx.AsyncClient, pb, _t, confirmation, password):
     response = await session.post(
-        f"{ENDPOINT_URL}auth/confirm/{confirmation}",
+        f"{endpoint_url}auth/confirm/{confirmation}",
         headers={"accept": "application/json", "Content-Type": "application/json"},
         json={"password": password},
+        timeout=120.0,
     )
-
-    pb.update(task_id=task_id, advance=1)
+    pb.update(_t, advance=1)
+    await asyncio.sleep(0.5)
     return response
 
 
-async def activate_users(rows, df, pb):
+async def activate_users(
+    endpoint_url,
+    rows,
+    df,
+):
     df_new = pl.DataFrame(rows, schema=["email", "confirmation"])
     df_new = df.join(df_new, on="email")
-    client = httpx.AsyncClient(verify=False, timeout=30.0)
+    client = httpx.AsyncClient(verify=False, timeout=120.0)
+    pb = Progress()
     _t = pb.add_task("Activando usuarios", total=len(df_new))
     result = await asyncio.gather(
-        *[activate_user_requests(client, pb, _t, row["confirmation"], row["password"]) for row in df_new.to_dicts()]
+        *[
+            activate_user_requests(endpoint_url, client, pb, _t, row["confirmation"], row["password"])
+            for row in df_new.to_dicts()
+        ]
     )
     await client.aclose()
     return result
@@ -45,66 +53,81 @@ def get_users_to_activate(cursor, emails):
     return cursor.fetchall()
 
 
-async def main():
-    with progress.Progress() as pb:
-        _t = pb.add_task("Cargando archivo", total=1)
+async def main(csv_file, endpoint_url):
+    console = Console()
+    with console.status("Cargando usuarios") as status:
+        console.log("Validando que el endpoint este activo")
+        try:
+            response = httpx.get(f"{endpoint_url}", verify=False, timeout=30.0)
+        except httpx.ConnectError:
+            console.log(f"Error conectando al endpoint {endpoint_url}")
+            return
+        console.log("Cargando archivo")
         df = pl.read_csv(csv_file, separator=";")
-        pb.update(task_id=_t, completed=1)
-        _t = pb.add_task("Cargando variables de entorno y validando", total=1)
+        console.log("Cargando variables de entorno y validando")
         load_dotenv("./.env")
-        pg_conn = {
-            "dbname": os.getenv("DATABASE_NAME"),
-            "user": os.getenv("USER_DB"),
-            "password": os.getenv("PASSWORD"),
-            "port": os.getenv("PORT"),
-            "host": os.getenv("HOST"),
-        }
-        assert all(value for _, value in pg_conn.items()), "Missing env variables"
-        pb.update(task_id=_t, completed=1)
+        pg_conn = (
+            os.getenv("DATABASE_NAME", None),
+            os.getenv("USER_DB"),
+            os.getenv("PASSWORD"),
+            os.getenv("PORT"),
+            os.getenv("HOST"),
+        )
+        assert all(value is not None for value in pg_conn), "Missing env variables"
 
         dns = (
-            f"postgres://{pg_conn['user']}"
-            f":{pg_conn['password']}"
-            f"@{pg_conn['host']}"
-            f":{pg_conn['port']}"
-            f"/{pg_conn['dbname']}?sslmode=require"
+            f"postgresql://{os.getenv('USER_DB')}"
+            f":{os.getenv('PASSWORD')}"
+            f"@{os.getenv('HOST')}"
+            f":{os.getenv('PORT')}"
+            f"/{os.getenv('DATABASE_NAME')}"
         )
-        _t = pb.add_task("Conectando a la base de datos", total=1)
+        console.log("Conectando a la base de datos")
         conn = psycopg2.connect(dns)
-        pb.update(task_id=_t, completed=1)
 
-        _t = pb.add_task("Validando duplicados", total=1)
+        console.log("Validando duplicados")
         codes = df.select(pl.col("code")).to_series().to_list()
         emails = df.select(pl.col("email")).to_series().to_list()
 
         assert len(emails) == len(set(emails)), "Duplicated emails"
         assert len(codes) == len(set(codes)), "Duplicated codes"
-        pb.update(task_id=_t, completed=1)
 
-        _t = pb.add_task("Cargando usuarios", total=1)
+        console.log("Cargando usuarios")
         df.drop("password").write_csv(temp_file_name)
+        respose = httpx.post(
+            "http://localhost:8000/auth/",
+            verify=False,
+            timeout=30.0,
+            data={"username": "admin@example.com", "password": "12345678"},
+        ).json()
+        user_token = f"{respose['token_type']} {respose['access_token']}"
         temp_file = open(temp_file_name, "rb")
         response = httpx.post(
-            url=f"{ENDPOINT_URL}load/students",
-            headers={"accept": "application/json"},
+            url=f"{endpoint_url}load/students",
+            headers={"accept": "application/json", "Authorization": user_token},
             files={"file": (temp_file_name, temp_file, "text/csv")},
             verify=False,
             timeout=30.0,
         )
 
-        assert response.status_code == 200, f"Error cargando el archivo {response.json()}"
-        pb.update(task_id=_t, completed=1)
-        temp_file.close()
+        try:
+            assert response.status_code == 200, f"Error cargando el archivo {response.json()}"
+        except Exception:
+            console.log(f"Error cargando el archivo {response.text}")
+            return
 
+        temp_file.close()
+        console.log("Activando usuarios")
         cursor = conn.cursor()
         rows = get_users_to_activate(cursor, emails)
         if len(rows) == 0:
-            pb.update(task_id=_t, description="No hay usuarios para activar", completed=1)
+            status.update("No hay usuarios para activar")
+            os.remove(temp_file_name)
             return
-        results = await activate_users(rows, df, pb)
+        results = await activate_users(endpoint_url, rows, df)
         if not (all(result.status_code == 200 for result in results)):
             rows = get_users_to_activate(cursor, emails)
-            await activate_users(rows, df, pb)
+            await activate_users(endpoint_url, rows, df)
 
     os.remove(temp_file_name)
     cursor.close()
@@ -112,4 +135,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = ArgumentParser()
+    parser.add_argument("file", type=Path, help="Archivo con los usuarios")
+    parser.add_argument("--endpoint", type=str, help="Endpoint de la API", default="http://localhost:8000/")
+    args = parser.parse_args()
+    asyncio.run(main(args.file.absolute(), args.endpoint))
