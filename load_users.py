@@ -2,7 +2,7 @@ import asyncio
 import os
 from argparse import ArgumentParser
 from pathlib import Path
-from time import sleep
+from typing import Literal
 
 import httpx
 import polars as pl
@@ -46,14 +46,14 @@ async def activate_users(
     return result
 
 
-def get_users_to_activate(cursor, emails):
+def get_users_to_activate(cursor, emails,model:Literal["students","teachers"]):
     cursor.execute(
-        "SELECT email,confirmation from students where email = ANY(%s) AND confirmation IS NOT NULL", (emails,)
+        "SELECT email,confirmation from %s where email = ANY(%s) AND confirmation IS NOT NULL", (model,emails,)
     )
     return cursor.fetchall()
 
 
-async def main(csv_file, endpoint_url):
+async def main(csv_file:str, endpoint_url:str,model:str):
     console = Console()
     with console.status("Cargando usuarios") as status:
         console.log("Validando que el endpoint este activo")
@@ -95,15 +95,27 @@ async def main(csv_file, endpoint_url):
         console.log("Cargando usuarios")
         df.drop("password").write_csv(temp_file_name)
         respose = httpx.post(
-            "http://localhost:8000/auth/",
+            f"{endpoint_url}/auth/",
             verify=False,
             timeout=30.0,
             data={"username": "admin@example.com", "password": "12345678"},
         ).json()
         user_token = f"{respose['token_type']} {respose['access_token']}"
+        if model == "teachers":
+            disciplines = ["Infraestructura y gestión  de la información","Ingeniería de software","Ciencias de la computación","Ciencias naturales","Comunicación","Matemáticas y estadística"]
+            disciplines = [{"name":discipline} for discipline in disciplines]
+            response = httpx.post(
+                url=f"{endpoint_url}/utils/add_discipline",
+                headers={"accept": "application/json", "Authorization": user_token},
+                json=disciplines,
+                verify=False,
+                timeout=30.0,
+            )
+            assert response.status_code == 200, f"Error cargando las disciplinas {response.json()}"
+            
         temp_file = open(temp_file_name, "rb")
         response = httpx.post(
-            url=f"{endpoint_url}load/students",
+            url=f"{endpoint_url}load/{model}",
             headers={"accept": "application/json", "Authorization": user_token},
             files={"file": (temp_file_name, temp_file, "text/csv")},
             verify=False,
@@ -119,7 +131,7 @@ async def main(csv_file, endpoint_url):
         temp_file.close()
         console.log("Activando usuarios")
         cursor = conn.cursor()
-        rows = get_users_to_activate(cursor, emails)
+        rows = get_users_to_activate(cursor, emails,model)
         if len(rows) == 0:
             status.update("No hay usuarios para activar")
             os.remove(temp_file_name)
@@ -137,6 +149,7 @@ async def main(csv_file, endpoint_url):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("file", type=Path, help="Archivo con los usuarios")
-    parser.add_argument("--endpoint", type=str, help="Endpoint de la API", default="http://localhost:8000/")
+    parser.add_argument("model",choices=["teachers","students"])
+    parser.add_argument("--endpoint", type=str, help="Endpoint de la API", default="http://localhost:8000")
     args = parser.parse_args()
-    asyncio.run(main(args.file.absolute(), args.endpoint))
+    asyncio.run(main(args.file.absolute(), args.endpoint,args.model))
