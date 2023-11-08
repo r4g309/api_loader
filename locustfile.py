@@ -31,143 +31,165 @@ class UserLogin(HttpUser):
                 "password": user["password"],
             },
             headers=headers,
-        ).json()
-        self.auth = {"Authorization": f"{token['token_type']} {token['access_token']}"}
-
+        )
+        if token.status_code == 200:
+            token = token.json()
+            self.auth = {"Authorization": f"{token['token_type']} {token['access_token']}"}
+            self.valid_token = True
+        else:
+            self.valid_token = False
+            self.auth =""
+            
     @task
     def get_students_by_limit(self):
-        self.client.get(f"/student/?limit={randint(1,100)}", headers=self.auth)
+        if self.valid_token:
+            self.client.get(f"/student/?limit={randint(1,100)}", headers=self.auth)
 
     @task
     def get_student_by_code(self):
-        global students
-        code = choice(students)["code"]
-        self.client.get(f"/student/code/{code}",headers=self.auth)
+        if self.valid_token:
+            global students
+            code = choice(students)["code"]
+            self.client.get(f"/student/code/{code}",headers=self.auth)
 
     @task
     def get_student_by_email(self):
-        global students
-        email = choice(students)["email"]
-        self.client.get(f"/student/email/{email}",headers=self.auth)
+        if self.valid_token:
+            global students
+            email = choice(students)["email"]
+            self.client.get(f"/student/email/{email}",headers=self.auth)
 
     @task
     def update_student_name(self):
         global students
-        user = choice(students)
-        response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            print(user_id)
-            self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
-                "name":random_string(10)
-            })
+        if self.valid_token:
+            user = choice(students)
+            response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                print(user_id)
+                self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
+                    "name":random_string(10)
+                })
 
     @task
     def update_student_name(self):
         global students
-        user = choice(students)
-        response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
-                "last_name":random_string(8)
-            })
+        if self.valid_token:
+            user = choice(students)
+            response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
+                    "last_name":random_string(8)
+                })
     @task
     def update_student_name_and_last_name(self):
         global students
-        user = choice(students)
-        response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
-                "name":random_string(10),
-                "last_name":random_string(8)
-            })
+        if self.valid_token:
+            user = choice(students)
+            response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
+                    "name":random_string(10),
+                    "last_name":random_string(8)
+                })
     @task
     def update_student_activate(self):
         global students
-        user = choice(students)
-        response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
-                "is_active":True
-            })
+        if self.valid_token:
+            user = choice(students)
+            response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/student/update/{user_id}",headers=self.auth,json={
+                    "is_active":True
+                })
     @task
     def deactivate_student(self):
         global students
-        user = choice(students)
-        response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/student/deactivate/{user_id}",headers=self.auth)
+        if self.valid_token:
+            user = choice(students)
+            response = self.client.get(f"/student/email/{user['email']}",headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/student/deactivate/{user_id}",headers=self.auth)
 
     @task   
     def get_teachers_by_limit(self):
-        self.client.get(f"/teacher/?limit={randint(1,100)}",headers=self.auth)
+        if self.valid_token:
+            self.client.get(f"/teacher/?limit={randint(1,100)}",headers=self.auth)
 
     @task
     def get_teacher_by_email(self):
         global teachers
-        user = choice(teachers)["email"]
-        self.client.get(f"/teacher/email/{user}", headers=self.auth)
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            self.client.get(f"/teacher/email/{user}", headers=self.auth)
 
     @task
     def put_teacher_name(self):
         global teachers
-        user = choice(teachers)["email"]
-        response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/teacher/update/{user_id}", data={"name":random_string(15)}, headers=self.auth)
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/teacher/update/{user_id}", data={"name":random_string(15)}, headers=self.auth)
     @task
     def put_teacher_last_name(self):
         global teachers
-        user = choice(teachers)["email"]
-        response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/teacher/update/{user_id}", data={"last_name":random_string(15)}, headers=self.auth) 
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/teacher/update/{user_id}", data={"last_name":random_string(15)}, headers=self.auth) 
     @task
     def put_teacher_work_hours(self):
         global teachers
-        user = choice(teachers)["email"]
-        response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/teacher/update/{user_id}", data={"work_hours":choice([None,randint(1,16)])}, headers=self.auth)
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/teacher/update/{user_id}", data={"work_hours":choice([None,randint(1,16)])}, headers=self.auth)
     
     @task
     def put_teacher_name(self):
         global teachers
-        user = choice(teachers)["email"]
-        response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-            self.client.put(f"/teacher/update/{user_id}", data={"name":random_string(15),"last_name":random_string(20), "work_hours":randint(1,100) }, headers=self.auth)
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+                self.client.put(f"/teacher/update/{user_id}", data={"name":random_string(15),"last_name":random_string(20), "work_hours":randint(1,100) }, headers=self.auth)
         
     @task
     def put_teacher_deactivate(self):
         global teachers
-        user = choice(teachers)["email"]
-        response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data[0]["id"]
-        self.client.put(f"/teacher/deactivate/{user_id}",headers=self.auth)
+        if self.valid_token:
+            user = choice(teachers)["email"]
+            response = self.client.get(f"/teacher/email/{user}", headers=self.auth)
+            if response.status_code == 200:
+                data = response.json()
+                user_id = data[0]["id"]
+            self.client.put(f"/teacher/deactivate/{user_id}",headers=self.auth)
 
     @task
     def get_list_disciplines(self):
-        self.client.get(f"/utils/list_discipline?limit={randint(1,20)}&skip={randint(1,3)}")
+        if self.valid_token:
+            self.client.get(f"/utils/list_discipline?limit={randint(1,20)}&skip={randint(1,3)}")
 
 def setup_test_users(environment, msg, **kwargs):
     global students,teachers, total_workers
