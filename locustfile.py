@@ -1,11 +1,11 @@
-from pathlib import Path
 from random import choice, randint, shuffle
 
 import polars as pl
 from locust import HttpUser, between, events, task
 from locust.runners import MasterRunner, WorkerRunner
 
-my_users = []
+students = []
+teachers = []
 total_workers = 0
 
 
@@ -14,11 +14,14 @@ class UserLogin(HttpUser):
     wait_time = between(1, 2)
 
     def on_start(self):
-        global my_users, total_workers
+        global students,teachers, total_workers
         headers = {"accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
-        shuffle(my_users)
-        shufle_data = my_users[0 : len(my_users) // total_workers]
-        user = choice(shufle_data)
+        shuffle(students)
+        shuffle(teachers)
+        if randint(0, 1) == 0:
+            user = choice(students)
+        else:
+            user = choice(teachers)
         token = self.client.post(
             "/auth/",
             data={
@@ -34,9 +37,10 @@ class UserLogin(HttpUser):
         self.client.get(f"/student/?limit={randint(1,100)}", headers=self.auth)
 
 
+
 def setup_test_users(environment, msg, **kwargs):
-    global my_users, total_workers
-    my_users, total_workers = msg.data
+    global students,teachesr, total_workers
+    students,teachers, total_workers = msg.data
     environment.runner.send_message("acknowledge_users", "Data received")
 
 
@@ -55,12 +59,8 @@ def on_locust_init(environment, **_kwargs):
 @events.test_start.add_listener
 def on_test_start(environment, **_kwargs):
     if not isinstance(environment.runner, WorkerRunner):
-        filename = Path(environment.parsed_options.file).absolute()
-        all_users = pl.read_csv(filename, separator=";").to_dicts()
+        students= pl.read_csv("./data/student_200.csv", separator=",").to_dicts()
+        teachers = pl.read_csv("./data/teachers_200.csv", sep=",").to_dicts()
         total_workers = environment.runner.worker_count
-        environment.runner.send_message("test_users", (all_users, total_workers))
+        environment.runner.send_message("test_users", (students,teachers, total_workers))
 
-
-@events.init_command_line_parser.add_listener
-def init_parser(parser):
-    parser.add_argument("--file", type=str, help="It's working", default="", include_in_web_ui=False)
